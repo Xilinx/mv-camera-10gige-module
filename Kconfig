@@ -1,0 +1,4 @@
+config NET_VENDOR_S2I
+	tristate "Sensor to Image Ethernet MAC support"
+	help
+	  Say Y here if you want to use the Sensor to Image Ethernet MAC.
