@@ -1,6 +1,10 @@
 /******************************************************************************/
 /*  Linux driver header for the s2imac device.                                */
-/*  Copyright (c) 2022. Sensor to Image GmbH. All rights reserved.            */
+/*  Copyright (c) 2022. Sensor to Image GmbH.						          */
+/*                                                                            */
+/*  This program is free software; you can redistribute it and/or modify      */
+/*  it under the terms of the GNU General Public License version 2 as         */
+/*  published by the Free Software Foundation.								  */
 /*----------------------------------------------------------------------------*/
 /*    File :  s2imac.h                                                        */
 /*    Date :  2021-09-29                                                      */
