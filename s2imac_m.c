@@ -1,6 +1,6 @@
 /******************************************************************************/
 /*  Linux driver for the s2imac device.                                       */
-/*  Copyright (c) 2022. Sensor to Image GmbH.								  */
+/*  Copyright (c) 2022. Sensor to Image GmbH.                                 */
 /*                                                                            */
 /*  This program is free software; you can redistribute it and/or modify      */
 /*  it under the terms of the GNU General Public License version 2 as         */
@@ -1766,7 +1766,7 @@ static int s2imac_of_probe(struct platform_device *ofdev)
   mac_l = in_be32 ((u32 *) MAC_LOW);
   
   if ((mac_h == 0) && (mac_l == 0)) {
-    mac_address = of_get_mac_address (np);
+    mac_address = of_get_mac_address (np, ndev->dev_addr);
     if (mac_address)
       /* Copy the MAC address from OF node. */
       memcpy (ndev->dev_addr, mac_address, 6);
@@ -2009,93 +2009,114 @@ static int s2imac_change_mtu (struct net_device *ndev, int new_mtu)
   return 0;
 }
 
-static int s2imac_ioctl (struct net_device *ndev, struct ifreq *rq, int cmd)
+static int s2imac_ioctl (struct net_device *ndev, struct ifreq *rq, void __user *data, int cmd)
 {
-  struct net_local *lp = (struct net_local *)netdev_priv (ndev);
-  s2igen_content_t gen_content;
+	struct net_local *lp = (struct net_local *)netdev_priv (ndev);
+	s2igen_content_t *gen_content;
+	int ret = 0;
 
-  if (copy_from_user (&gen_content, rq->ifr_data, sizeof (gen_content)))
-    return -EFAULT;
+	gen_content = kmalloc(sizeof(s2igen_content_t), GFP_KERNEL);
+	if (!gen_content)
+		return -ENOMEM;
+
+	ret = copy_from_user (gen_content, data, sizeof (s2igen_content_t));
+	if (ret) {
+		printk(KERN_ERR "copy_from_user fails ret = %d", ret);
+		printk(KERN_ERR "gen_content address = %u data = %u\n", gen_content->address, gen_content->data);
+		kfree(gen_content);
+	    return -EFAULT;
+	}
 
   /* check address range 1st slot --> device base address */
   if((cmd == SIOS2IGENRD) || (cmd == SIOS2IGENWR)){
-
-    if (gen_content.address > (ndev->mem_end - ndev->mem_start + 1))
-      return -EINVAL;
+    if (gen_content->address > (ndev->mem_end - ndev->mem_start + 1))
+	{
+		printk(KERN_ERR "gen_content->address failed");
+		kfree(gen_content);
+		return -EINVAL;
+	}
   }
 
   /* check address range 2st slot --> register base address */
   if((cmd == SIOS2IVIDEORD) || (cmd == SIOS2IVIDEOWR)){
 
-    if (gen_content.address > (lp->video_end - lp->video_start + 1))
-      return -EINVAL;
+    if (gen_content->address > (lp->video_end - lp->video_start + 1)) {
+		kfree(gen_content);
+		return -EINVAL;
+	}
   }
   
   /* check address range 3st slot --> register base address */
   if((cmd == SIOS2IFBUFRD) || (cmd == SIOS2IFBUFWR)){
 
-    if (gen_content.address > (lp->framebuffer_end - lp->framebuffer_start + 1))
-      return -EINVAL;
+    if (gen_content->address > (lp->framebuffer_end - lp->framebuffer_start + 1)) {
+		kfree(gen_content);
+		return -EINVAL;
+	}
   }
 
   switch (cmd) {
   case SIOS2IGENRD: /* core read */
 
-    gen_content.data =
-        in_be32 ((u32 *) (lp->base_addr[S2IMAC_GIGEMAP] + gen_content.address));
+    gen_content->data =
+        in_be32 ((u32 *) (lp->base_addr[S2IMAC_GIGEMAP] + gen_content->address));
 
-    if (copy_to_user
-        (rq->ifr_data, &gen_content, sizeof (gen_content)))
-      return -EFAULT;
-
-    return 0;
+	ret = copy_to_user(data, gen_content, sizeof (s2igen_content_t));
+    if (ret) {
+		printk(KERN_ERR "copy_to_user failed ret = %d", ret);
+		kfree(gen_content);
+		return -EFAULT;
+	}
+	break;
 
   case SIOS2IGENWR: /* core write */
 
-    out_be32 ((u32 *) (lp->base_addr[S2IMAC_GIGEMAP] + gen_content.address),
-        gen_content.data);
-
-    return 0;
+    out_be32 ((u32 *) (lp->base_addr[S2IMAC_GIGEMAP] + gen_content->address),
+        gen_content->data);
+	break;
 
   case SIOS2IVIDEORD: /* video register read */
 
-    gen_content.data =
-        in_be32 ((u32 *) (lp->base_addr[S2IMAC_VIDEOMAP] + gen_content.address));
+    gen_content->data =
+        in_be32 ((u32 *) (lp->base_addr[S2IMAC_VIDEOMAP] + gen_content->address));
 
     if (copy_to_user
-        (rq->ifr_data, &gen_content, sizeof (gen_content)))
-      return -EFAULT;
-
-    return 0;
+        (data, gen_content, sizeof (s2igen_content_t))) {
+		kfree(gen_content);
+		return -EFAULT;
+	}
+	break;
 
   case SIOS2IVIDEOWR: /* video register write */
 
-    out_be32 ((u32 *) (lp->base_addr[S2IMAC_VIDEOMAP] + gen_content.address),
-        gen_content.data);
-
-    return 0;
+    out_be32 ((u32 *) (lp->base_addr[S2IMAC_VIDEOMAP] + gen_content->address),
+        gen_content->data);
+	break;
 
   case SIOS2IFBUFRD: /* framebuffer register read */
 
-    gen_content.data =
-        in_be32 ((u32 *) (lp->base_addr[S2IMAC_FRAMEBUFFERMAP] + gen_content.address));
+    gen_content->data =
+        in_be32 ((u32 *) (lp->base_addr[S2IMAC_FRAMEBUFFERMAP] + gen_content->address));
 
     if (copy_to_user
-        (rq->ifr_data, &gen_content, sizeof (gen_content)))
-      return -EFAULT;
-
-    return 0;
+        (data, gen_content, sizeof (s2igen_content_t))) {
+		kfree(gen_content);
+		return -EFAULT;
+	}
+	break;
 
   case SIOS2IFBUFWR: /* framebuffer register write */
 
-    out_be32 ((u32 *) (lp->base_addr[S2IMAC_FRAMEBUFFERMAP] + gen_content.address),
-        gen_content.data);
+    out_be32 ((u32 *) (lp->base_addr[S2IMAC_FRAMEBUFFERMAP] + gen_content->address),
+        gen_content->data);
+	break;
 
-    return 0;
-    
   default:
+	kfree(gen_content);
     return -EOPNOTSUPP;
   }
+	kfree(gen_content);
+	return 0;
 }
 
 /**
@@ -2126,7 +2147,7 @@ static struct net_device_ops s2imac_netdev_ops = {
   .ndo_open = s2imac_open,
   .ndo_stop = s2imac_close,
   .ndo_start_xmit = s2imac_send,
-  .ndo_do_ioctl = s2imac_ioctl,
+  .ndo_siocdevprivate = s2imac_ioctl,
   .ndo_change_mtu = s2imac_change_mtu,
   .ndo_set_mac_address = s2imac_set_mac_address,
   .ndo_tx_timeout = s2imac_tx_timeout,
